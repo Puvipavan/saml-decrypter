@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAML Decrypter</title>
+    <script src="wasm_exec.js"></script>
+    <script>
+        if (!WebAssembly.instantiateStreaming) { // polyfill
+            WebAssembly.instantiateStreaming = async (resp, importObject) => {
+                const source = await (await resp).arrayBuffer();
+                return await WebAssembly.instantiate(source, importObject);
+            };
+        }
+
+        const go = new Go();
+        WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => {
+            go.run(result.instance);
+        });
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background-color: #0b71ed;
+            color: white;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            flex-direction: column;
+        }
+
+        .top,
+        .bottom {
+            flex: 1;
+        }
+
+        .top {
+            display: flex;
+            padding: 1em 1em 0 1em;
+        }
+
+        .bottom {
+            padding: 0 1em 1em 1em;
+        }
+
+        .left,
+        .right {
+            flex: 1;
+            padding: 1em 1em 0 1em;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #0b71ed;
+            color: white;
+            border: none;
+            padding: 0.75em;
+            cursor: pointer;
+            font-size: 1em;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #095bb5;
+        }
+
+        button:active {
+            background-color: #074a8c;
+        }
+
+        textarea,
+        input,
+        select,
+        button {
+            width: 100%;
+            margin-bottom: 1em;
+            padding: 0.5em;
+            box-sizing: border-box;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        .guidelines {
+            margin-top: 1em;
+        }
+
+        textarea,
+        select {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            resize: vertical;
+        }
+
+        textarea:focus,
+        select:focus {
+            border-color: #0b71ed;
+            outline: none;
+        }
+
+        #logs {
+            font-family: 'Courier New', Courier, monospace;
+            border: 1px solid #ccc;
+            padding: 1em;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+
+        #logs p {
+            margin: 0;
+            color: #333;
+        }
+
+        #decrypted_assertion {
+            overflow: hidden;
+            height: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>SAML 2.0 Assertion Decrypter 🔐</h1>
+    </header>
+    <div class="container">
+        <div class="top">
+            <div class="left">
+                <label for="xml_assertion">XML Assertion(XML)</label>
+                <textarea id="xml_assertion" placeholder='<?xml version="1.0" encoding="UTF-8"?>
+<saml2p:Response xmlns:saml2p="urn:oasis:names:tc:SAML:2.0:protocol" Destination="https://example.com/Shibboleth.sso/SAML2/POST" ID="_7570b48d6e307032daf33468cd1906c7"
+InResponseTo="_dddaad86799643658170c9f2b877477e" IssueInstant="2025-08-08T08:08:08.800Z" Version="2.0">
+    <saml2:Issuer xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion">https://example.org/entityId</saml2:Issuer>
+    <ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">...' style="height: 11em;"></textarea>
+                <label for="sp_private_key">Service Provider Private Key(PCKS1/PCKS8 - PEM Format)</label>
+                <textarea id="sp_private_key" placeholder="-----BEGIN PRIVATE KEY-----
+MIIEvwIBADCNBgkqhkiG9wNOT/BADASCBKkwggSlAgEAAoIBAQC7xOmnsMak3T00l
+COWvwIBADCNBgkqhkiG9wNOT/BADASCBKkwggSlAgEMak3T00lSGREATAGAINMaKe
+Mak3T00lSGREATAGAINMak3T00lSGREATAGAINMak3T00lSGREATAGAINMak3T00l
+hcasqMak3T00lSGREATAGAINouV5vzyRe87/Mak3T00lSGREATAGAIN+K9Hj5fKuU
+ -----END PRIVATE KEY-----" style="height: 10em;"></textarea>
+                <button id="extract_data">Extract Data & Decrypt</button>
+            </div>
+            <div class="right">
+                <label for="encrypted_key">Encrypted Key(Base64)</label>
+                <textarea id="encrypted_key" placeholder="Base64 Encoded Encrypted Key"></textarea>
+
+                <label for="encryption_digest_method">Encryption Algorithm(Key) Digest</label>
+                <select id="encryption_digest_method">
+                    <option selected></option>
+                    <option value="sha-1">sha-1</option>
+                    <option value="sha-256">sha-256</option>
+                    <option value="sha-384">sha-384</option>
+                    <option value="sha-512">sha-512</option>
+                </select>
+
+                <label for="encryption_algorithm_key">Encryption Algorithm(Key)</label>
+                <select id="encryption_algorithm_key">
+                    <option selected></option>
+                    <option value="rsa-oaep">rsa-oaep</option>
+                    <option value="rsassa-pkcs1-v1_5">rsassa-pkcs1-v1_5</option>
+                </select>
+
+                <label for="encryption_algorithm_data">Encryption Algorithm(Data)</label>
+                <select id="encryption_algorithm_data">
+                    <option selected></option>
+                    <option value="aes128-gcm">aes128-gcm</option>
+                    <option value="aes192-gcm">aes192-gcm</option>
+                    <option value="aes256-gcm">aes256-gcm</option>
+                    <option value="aes128-cbc">aes128-cbc</option>
+                    <option value="aes192-cbc">aes192-cbc</option>
+                    <option value="aes256-cbc">aes256-cbc</option>
+                </select>
+
+                <label for="encrypted_assertion">Encrypted Assertion(Base64)</label>
+                <textarea id="encrypted_assertion" placeholder="Encrypted Data"></textarea>
+
+                <button id="decrypt">Decrypt</button>
+            </div>
+        </div>
+        <div class="bottom">
+            <h2 style="text-align: center;">Logs</h2>
+            <div id="logs"></div>
+
+            <h2 id="decrypted_assertion_section" style="text-align: center;">Decrypted SAML Assertion</h2>
+            <textarea id="decrypted_assertion" placeholder="Decrypted SAML Assertion will appear here."
+                readonly></textarea>
+            <button id="copy_decrypted_assertion" style="width: 100%;" disabled>Copy Decrypted Assertion</button>
+            <div class="guidelines">
+                <h2>Guidelines</h2>
+                <p>Please provide the encrypted XML assertion and the service provider's private key. We will parse and
+                    decrypt the data to process the SAML information accurately.
+                </p>
+                <p>We will automatically populate the text fields whenever possible, but if parsing is unsuccessful you
+                    can manually provide the encrypted data (Base64), the encrypted key (Base64), the encryption
+                    algorithm (key digest), the encryption algorithm (key), the encryption algorithm (data), and the
+                    service provider private key (PKCS#1 or PKCS#8 in PEM format), so you always retain full control
+                    over the input values.</p>
+                <p>This tool is 100% client-side. We don't collect your data. Source code is available on <a href="https://github.com/puvipavan/saml-decrypter" target="_blank" rel="noopener noreferrer">GitHub @Puvipavan</a>.</p>
+                <p>Got a private key in another format? Convert it to PKCS1 or PKCS8 PEM.
+                    <br>
+                    DER to PKCS8 Conversion:<br>
+                    <code>openssl pkcs8 -inform DER -in private_key.der -outform PEM -out private_key.pem -nocrypt</code>
+                </p>
+                <p>Having issues? Create an issue via <a href="https://github.com/puvipavan/saml-decrypter/issues"
+                        target="_blank" rel="noopener noreferrer">Github Issues</a>.</p>
+            </div>
+        </div>
+    </div>
+    <script src="main.js"></script>
+</body>
+
+</html>
